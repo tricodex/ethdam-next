@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ROFL Swap - Private Token Exchange
+
+A decentralized exchange (DEX) interface for swapping WATER and FIRE tokens using Oasis Sapphire's confidential EVM and ROFL (Runtime Off-chain Logic) framework.
+
+## Features
+
+- Swap between WATER and FIRE tokens with complete privacy
+- Powered by Oasis Sapphire's confidential EVM
+- Uses ROFL framework for secure off-chain computation
+- Clean, modern UI inspired by leading DEXes
+
+## Tech Stack
+
+- Next.js 15
+- TailwindCSS 4
+- React 19
+- TypeScript
+- Oasis Sapphire integration (backend)
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Install dependencies
+npm install
+
+# Run the development server
 npm run dev
 # or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+./run.sh
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `src/app/page.tsx` - Main swap interface
+- `src/app/globals.css` - Global styles and theme
+- `src/components/ui/` - UI components
 
-## Learn More
+## Backend Integration
 
-To learn more about Next.js, take a look at the following resources:
+This frontend is designed to work with a backend implementation built on:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Oasis Sapphire's confidential EVM for privacy-preserving transactions
+- ROFL framework for secure off-chain order matching
+- Smart contracts for WATER and FIRE token handling
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## ETHDam Hackathon Project
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project was built for the ETHDam III Hackathon as part of the Oasis track.
