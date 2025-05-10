@@ -21,21 +21,33 @@ const TokenIcon = ({ type }: { type: "water" | "fire" }) => {
 export default function Home() {
   const [fromToken, setFromToken] = useState<"water" | "fire">("water");
   const [toToken, setToToken] = useState<"water" | "fire">("fire");
-  const [fromAmount, setFromAmount] = useState("1.0");
-  const [toAmount, setToAmount] = useState("1.0");
+  const [fromAmount, setFromAmount] = useState("");
+  const [toAmount, setToAmount] = useState("");
 
   const handleSwapTokens = () => {
     setFromToken(toToken);
     setToToken(fromToken);
-    setFromAmount(toAmount);
-    setToAmount(fromAmount);
   };
 
   const handleFromAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
+    
+    // Allow empty input
+    if (value === "") {
+      setFromAmount("");
+      return;
+    }
+
+    // Only allow numbers and one decimal point
+    if (!/^\d*\.?\d*$/.test(value)) return;
+
+    // Limit to 2 decimal places
+    if (value.includes('.')) {
+      const [whole, decimal] = value.split('.');
+      if (decimal && decimal.length > 2) return;
+    }
+
     setFromAmount(value);
-    // In a real app, this would calculate the to amount based on exchange rate
-    setToAmount(value);
   };
 
   return (
@@ -78,10 +90,11 @@ export default function Home() {
               <div className="flex items-center space-x-3">
                 <input
                   type="text"
+                  inputMode="decimal"
                   value={fromAmount}
                   onChange={handleFromAmountChange}
-                  className="bg-transparent text-2xl font-semibold flex-1 focus:outline-none"
-                  placeholder="0.0"
+                  className="bg-transparent text-2xl font-semibold flex-1 focus:outline-none rounded-lg px-3 py-1.5 w-[140px] placeholder:text-muted-foreground/50"
+                  placeholder="0.00"
                 />
                 <Button 
                   variant="ghost" 
@@ -95,7 +108,7 @@ export default function Home() {
             </div>
 
             {/* Swap Button */}
-            <div className="flex justify-center -my-2 relative z-10">
+            <div className="flex justify-center relative" style={{ transform: 'translateY(-50%)', top: '50%', marginTop: '44px' }}>
               <Button 
                 onClick={handleSwapTokens}
                 size="icon" 
@@ -117,7 +130,7 @@ export default function Home() {
                   value={toAmount}
                   readOnly
                   className="bg-transparent text-2xl font-semibold flex-1 focus:outline-none"
-                  placeholder="0.0"
+                  placeholder="0.00"
                 />
                 <Button 
                   variant="ghost" 
