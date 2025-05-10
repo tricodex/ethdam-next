@@ -9,15 +9,20 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@oasisprotocol/sapphire-wagmi-v2": "^2.1.0",
     "@radix-ui/react-dialog": "^1.1.13",
     "@radix-ui/react-slot": "^1.2.2",
+    "@radix-ui/react-toast": "^1.2.13",
+    "@tanstack/react-query": "^5.75.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.509.0",
     "next": "15.3.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.2.0"
+    "tailwind-merge": "^3.2.0",
+    "viem": "^2.29.1",
+    "wagmi": "^2.15.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

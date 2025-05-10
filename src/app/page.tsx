@@ -1,10 +1,18 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { ArrowDown, ArrowRightLeft, Droplets, Flame, Settings, ChevronDown } from "lucide-react";
+import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from 'wagmi';
+import { useWriteContract, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
+import { injected } from 'wagmi/connectors';
+import { contractConfig } from './contract-config';
+import { parseEther } from 'viem';
+import { config } from './wagmi-config';
+import { WATER_TOKEN_ADDRESS, FIRE_TOKEN_ADDRESS } from './contract-config';
+import { erc20Abi } from 'viem';
 
 const TokenIcon = ({ type }: { type: "water" | "fire" }) => {
   return (
@@ -23,6 +31,62 @@ export default function Home() {
   const [toToken, setToToken] = useState<"water" | "fire">("fire");
   const [fromAmount, setFromAmount] = useState("");
   const [toAmount, setToAmount] = useState("");
+  const [swapStatus, setSwapStatus] = useState<"idle" | "approving" | "placing" | "success" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [approvalHash, setApprovalHash] = useState<`0x${string}` | undefined>();
+  const [orderHash, setOrderHash] = useState<`0x${string}` | undefined>();
+  const [pendingAmount, setPendingAmount] = useState<bigint | undefined>();
+
+  const { isLoading: isApprovalConfirming, isSuccess: isApprovalConfirmed } = useWaitForTransactionReceipt({
+    hash: approvalHash,
+  });
+
+  const { isLoading: isOrderConfirming, isSuccess: isOrderConfirmed } = useWaitForTransactionReceipt({
+    hash: orderHash,
+  });
+
+  const { address, isConnected } = useAccount();
+  const { connect } = useConnect();
+  const { disconnect } = useDisconnect();
+  const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+
+  // Contract write hook for placing orders
+  const { writeContractAsync } = useWriteContract();
+
+  // Contract read hooks for getting token addresses
+  const { data: waterTokenAddress } = useReadContract({
+    ...contractConfig,
+    functionName: 'waterToken',
+  });
+
+  const { data: fireTokenAddress } = useReadContract({
+    ...contractConfig,
+    functionName: 'fireToken',
+  });
+
+
+  // Enhanced network detection
+  const SAPPHIRE_TESTNET_ID = 23295;
+  const isCorrectNetwork = chainId === SAPPHIRE_TESTNET_ID;
+
+  // Get chain info from config
+  const currentChain = config.chains.find(chain => chain.id === chainId);
+
+  // // Add more detailed network debugging
+  // console.log('Wallet Network Debug:', {
+  //   chainId,
+  //   currentChainInfo: currentChain ? {
+  //     name: currentChain.name,
+  //     network: currentChain.network,
+  //     nativeCurrency: currentChain.nativeCurrency,
+  //   } : 'Unknown Chain',
+  //   isCorrectNetwork,
+  //   expectedNetwork: SAPPHIRE_TESTNET_ID,
+  //   currentChainHex: chainId ? `0x${chainId.toString(16)}` : null,
+  //   isConnected,
+  //   walletAddress: address,
+  // });
 
   const handleSwapTokens = () => {
     setFromToken(toToken);
@@ -31,24 +95,199 @@ export default function Home() {
 
   const handleFromAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    
-    // Allow empty input
-    if (value === "") {
-      setFromAmount("");
-      return;
-    }
-
-    // Only allow numbers and one decimal point
-    if (!/^\d*\.?\d*$/.test(value)) return;
-
-    // Limit to 2 decimal places
-    if (value.includes('.')) {
-      const [whole, decimal] = value.split('.');
-      if (decimal && decimal.length > 2) return;
-    }
-
     setFromAmount(value);
+    setToAmount(value);
   };
+
+  const handleSwitchNetwork = async () => {
+    try {
+      console.log('Attempting to switch to Sapphire Testnet...');
+      await switchChain({
+        chainId: SAPPHIRE_TESTNET_ID,
+        addEthereumChainParameter: {
+          chainName: 'Oasis Sapphire Testnet',
+          nativeCurrency: {
+            name: 'ROSE',
+            symbol: 'ROSE',
+            decimals: 18,
+          },
+          rpcUrls: ['https://testnet.sapphire.oasis.dev'],
+          blockExplorerUrls: ['https://explorer.oasis.io/testnet/sapphire'],
+        }
+      });
+      console.log('Network switch request sent');
+    } catch (error) {
+      console.error('Failed to switch network:', error);
+    }
+  };
+
+  // Split the order placement into a separate function
+  const handlePlaceOrder = async () => {
+    if (!pendingAmount) return;
+    
+    try {
+      setSwapStatus("placing");
+      console.log('Initiating order placement...');
+      
+      const hash = await writeContractAsync({
+        ...contractConfig,
+        functionName: 'placeOrder',
+        args: [pendingAmount, parseEther('1'), fromToken === 'water'],
+      });
+
+      if (!hash) {
+        throw new Error('No transaction hash received');
+      }
+
+      console.log('Waiting for order confirmation...', hash);
+      setOrderHash(hash);
+      
+    } catch (error) {
+      console.error('Error during order placement:', error);
+      setErrorMessage('Failed to place order');
+      setSwapStatus("error");
+    }
+  };
+
+  // Effect to handle approval confirmation
+  useEffect(() => {
+    if (isApprovalConfirmed) {
+      console.log('Approval confirmed!');
+      handlePlaceOrder();
+    }
+  }, [isApprovalConfirmed]);
+
+  // Effect to handle order confirmation
+  useEffect(() => {
+    if (isOrderConfirmed) {
+      console.log('Order confirmed!');
+      setSwapStatus("success");
+      // Clear input fields on success
+      setFromAmount("");
+      setToAmount("");
+      // Clear the pending amount
+      setPendingAmount(undefined);
+    }
+  }, [isOrderConfirmed]);
+
+  const handleSwap = async () => {
+    if (!fromAmount || !address) return;
+
+    setSwapStatus("idle");
+    setErrorMessage(null);
+    setApprovalHash(undefined);
+    setOrderHash(undefined);
+
+    // Enhanced network check
+    if (!isCorrectNetwork) {
+      console.log('Wrong network detected, attempting to switch...');
+      await handleSwitchNetwork();
+      // Add a check to see if the switch was successful
+      if (chainId !== SAPPHIRE_TESTNET_ID) {
+        console.log('Network switch did not complete successfully');
+        setErrorMessage("Failed to switch to Sapphire Network");
+        return;
+      }
+    }
+
+    try {
+      // Determine which token to approve
+      const tokenAddress = fromToken === 'water' ? WATER_TOKEN_ADDRESS : FIRE_TOKEN_ADDRESS;
+      const amount = parseEther(fromAmount);
+      // Store the amount for later use
+      setPendingAmount(amount);
+
+      // Approve token spending
+      setSwapStatus("approving");
+      console.log('Initiating token approval...');
+      
+      try {
+        const hash = await writeContractAsync({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [contractConfig.address, amount],
+        });
+
+        if (!hash) {
+          throw new Error('No transaction hash received');
+        }
+
+        console.log('Waiting for approval confirmation...', hash);
+        setApprovalHash(hash);
+        
+      } catch (error) {
+        console.error('Error during token approval:', error);
+        setErrorMessage('Failed to approve token spending');
+        setSwapStatus("error");
+        setPendingAmount(undefined);
+        return;
+      }
+      
+      // Place the order
+      setSwapStatus("placing");
+      console.log('Initiating order placement...');
+      
+      try {
+        const hash = await writeContractAsync({
+          ...contractConfig,
+          functionName: 'placeOrder',
+          args: [amount, parseEther('1'), fromToken === 'water'],
+        });
+
+        if (!hash) {
+          throw new Error('No transaction hash received');
+        }
+
+        console.log('Waiting for order confirmation...', hash);
+        
+        const { data: receipt } = await useWaitForTransactionReceipt({ hash });
+        console.log('Order confirmed!', receipt);
+        
+        setSwapStatus("success");
+        // Clear input fields on success
+        setFromAmount("");
+        setToAmount("");
+        
+      } catch (error) {
+        console.error('Error during order placement:', error);
+        setErrorMessage('Failed to place order');
+        setSwapStatus("error");
+      }
+
+    } catch (error) {
+      console.error('Failed during swap process:', error);
+      let errorMsg = 'Unknown error occurred';
+      
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack
+        });
+        errorMsg = error.message;
+      } else {
+        console.error('Non-Error object thrown:', error);
+      }
+      
+      setErrorMessage(errorMsg);
+      setSwapStatus("error");
+      setPendingAmount(undefined);
+    }
+  };
+
+  // Add this helper function to check if amount is valid
+  const isValidAmount = (amount: string) => {
+    const num = parseFloat(amount);
+    return !isNaN(num) && num > 0;
+  };
+
+  // Debug button state
+  // console.log('Button state:', {
+  //   fromAmount,
+  //   isConnected,
+  //   isPending,
+  //   isValidAmount: fromAmount && parseFloat(fromAmount) > 0,
+  // });
 
   return (
     <div className="dark-gradient min-h-screen flex flex-col">
@@ -58,13 +297,61 @@ export default function Home() {
           <Image src="/logo.svg" alt="ROFL Swap Logo" width={40} height={40} />
           <h1 className="text-xl font-bold text-white">ROFL Swap</h1>
         </div>
-        <Button variant="ghost" className="text-white">
-          <Settings size={20} />
-        </Button>
+        <div className="flex items-center gap-2">
+          {isConnected ? (
+            <div className="flex items-center gap-2">
+              <span className="text-white">{address?.slice(0, 6)}...{address?.slice(-4)}</span>
+              {chainId !== 23295 && (
+                <Button 
+                  className="bg-yellow-500 text-white"
+                  onClick={handleSwitchNetwork}
+                >
+                  Switch to Sapphire
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                className="text-white"
+                onClick={() => disconnect()}
+              >
+                Disconnect
+              </Button>
+            </div>
+          ) : (
+            <Button 
+              className="bg-blue-500 text-white"
+              onClick={() => connect({ connector: injected() })}
+            >
+              Connect Wallet
+            </Button>
+          )}
+          <Button variant="ghost" className="text-white">
+            <Settings size={20} />
+          </Button>
+        </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 flex items-center justify-center p-4">
+        {errorMessage && (
+          <div className="absolute top-24 w-full max-w-md mx-auto bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-4">
+            <p className="text-red-500 text-center">{errorMessage}</p>
+          </div>
+        )}
+        
+        {isConnected && !isCorrectNetwork && (
+          <div className="absolute top-24 w-full max-w-md mx-auto bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-4">
+            <div className="flex flex-col items-center text-center gap-2">
+              <p className="text-yellow-500">Please switch to Sapphire Network to use the swap</p>
+              <Button 
+                onClick={handleSwitchNetwork}
+                className="bg-yellow-500 text-white hover:bg-yellow-600"
+              >
+                Switch to Sapphire Network
+              </Button>
+            </div>
+          </div>
+        )}
         <Card className="glass-card max-w-md w-full mx-auto overflow-hidden shadow-2xl">
           <CardHeader className="p-6 border-b border-border">
             <CardTitle className="text-xl font-bold flex items-center justify-between">
@@ -90,9 +377,11 @@ export default function Home() {
               <div className="flex items-center space-x-3">
                 <input
                   type="text"
-                  inputMode="decimal"
                   value={fromAmount}
-                  onChange={handleFromAmountChange}
+                  onChange={(e) => {
+                    setFromAmount(e.target.value);
+                    setToAmount(e.target.value);
+                  }}
                   className="bg-transparent text-2xl font-semibold flex-1 focus:outline-none rounded-lg px-3 py-1.5 w-[140px] placeholder:text-muted-foreground/50"
                   placeholder="0.00"
                 />
@@ -159,9 +448,20 @@ export default function Home() {
           <CardFooter className="p-6 pt-0">
             <Button 
               className="w-full py-6 water-fire-gradient font-bold text-white"
-              disabled={!fromAmount || parseFloat(fromAmount) <= 0}
+              disabled={!isConnected || (isConnected && !isValidAmount(fromAmount)) || swapStatus === "approving" || swapStatus === "placing"}
+              onClick={handleSwap}
             >
-              Connect Wallet
+              {!isConnected 
+                ? 'Connect Wallet' 
+                : !isCorrectNetwork 
+                ? 'Switch to Sapphire Network'
+                : !isValidAmount(fromAmount)
+                ? 'Enter an amount'
+                : swapStatus === "approving"
+                ? 'Approving...'
+                : swapStatus === "placing"
+                ? 'Placing Order...'
+                : 'Swap'}
             </Button>
           </CardFooter>
         </Card>
