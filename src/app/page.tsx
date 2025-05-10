@@ -4,9 +4,9 @@ import Image from "next/image";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { ArrowDown, ArrowRightLeft, Droplets, Flame, Settings, ChevronDown } from "lucide-react";
+import { ArrowRightLeft, Droplets, Flame, Settings, ChevronDown } from "lucide-react";
 import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from 'wagmi';
-import { useWriteContract, useReadContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { injected } from 'wagmi/connectors';
 import { contractConfig } from './contract-config';
 import { parseEther } from 'viem';
@@ -54,18 +54,6 @@ export default function Home() {
   // Contract write hook for placing orders
   const { writeContractAsync } = useWriteContract();
 
-  // Contract read hooks for getting token addresses
-  const { data: waterTokenAddress } = useReadContract({
-    ...contractConfig,
-    functionName: 'waterToken',
-  });
-
-  const { data: fireTokenAddress } = useReadContract({
-    ...contractConfig,
-    functionName: 'fireToken',
-  });
-
-
   // Enhanced network detection
   const SAPPHIRE_TESTNET_ID = 23295;
   const isCorrectNetwork = chainId === SAPPHIRE_TESTNET_ID;
@@ -73,31 +61,11 @@ export default function Home() {
   // Get chain info from config
   const currentChain = config.chains.find(chain => chain.id === chainId);
 
-  // // Add more detailed network debugging
-  // console.log('Wallet Network Debug:', {
-  //   chainId,
-  //   currentChainInfo: currentChain ? {
-  //     name: currentChain.name,
-  //     network: currentChain.network,
-  //     nativeCurrency: currentChain.nativeCurrency,
-  //   } : 'Unknown Chain',
-  //   isCorrectNetwork,
-  //   expectedNetwork: SAPPHIRE_TESTNET_ID,
-  //   currentChainHex: chainId ? `0x${chainId.toString(16)}` : null,
-  //   isConnected,
-  //   walletAddress: address,
-  // });
-
   const handleSwapTokens = () => {
     setFromToken(toToken);
     setToToken(fromToken);
   };
 
-  const handleFromAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setFromAmount(value);
-    setToAmount(value);
-  };
 
   const handleSwitchNetwork = async () => {
     try {
@@ -223,37 +191,6 @@ export default function Home() {
         setPendingAmount(undefined);
         return;
       }
-      
-      // Place the order
-      setSwapStatus("placing");
-      console.log('Initiating order placement...');
-      
-      try {
-        const hash = await writeContractAsync({
-          ...contractConfig,
-          functionName: 'placeOrder',
-          args: [amount, parseEther('1'), fromToken === 'water'],
-        });
-
-        if (!hash) {
-          throw new Error('No transaction hash received');
-        }
-
-        console.log('Waiting for order confirmation...', hash);
-        
-        const { data: receipt } = await useWaitForTransactionReceipt({ hash });
-        console.log('Order confirmed!', receipt);
-        
-        setSwapStatus("success");
-        // Clear input fields on success
-        setFromAmount("");
-        setToAmount("");
-        
-      } catch (error) {
-        console.error('Error during order placement:', error);
-        setErrorMessage('Failed to place order');
-        setSwapStatus("error");
-      }
 
     } catch (error) {
       console.error('Failed during swap process:', error);
@@ -280,14 +217,6 @@ export default function Home() {
     const num = parseFloat(amount);
     return !isNaN(num) && num > 0;
   };
-
-  // Debug button state
-  // console.log('Button state:', {
-  //   fromAmount,
-  //   isConnected,
-  //   isPending,
-  //   isValidAmount: fromAmount && parseFloat(fromAmount) > 0,
-  // });
 
   return (
     <div className="dark-gradient min-h-screen flex flex-col">
