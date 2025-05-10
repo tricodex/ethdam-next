@@ -5,11 +5,11 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { ArrowRightLeft, Droplets, Flame, Settings, ChevronDown } from "lucide-react";
-import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain, useBalance } from 'wagmi';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { injected } from 'wagmi/connectors';
 import { contractConfig } from './contract-config';
-import { parseEther } from 'viem';
+import { parseEther, formatEther, stringToBytes, toHex, decodeEventLog } from 'viem';
 import { config } from './wagmi-config';
 import { WATER_TOKEN_ADDRESS, FIRE_TOKEN_ADDRESS } from './contract-config';
 import { erc20Abi } from 'viem';
@@ -36,12 +36,13 @@ export default function Home() {
   const [approvalHash, setApprovalHash] = useState<`0x${string}` | undefined>();
   const [orderHash, setOrderHash] = useState<`0x${string}` | undefined>();
   const [pendingAmount, setPendingAmount] = useState<bigint | undefined>();
+  const [displayedOrderId, setDisplayedOrderId] = useState<string | null>(null);
 
   const { isLoading: isApprovalConfirming, isSuccess: isApprovalConfirmed } = useWaitForTransactionReceipt({
     hash: approvalHash,
   });
 
-  const { isLoading: isOrderConfirming, isSuccess: isOrderConfirmed } = useWaitForTransactionReceipt({
+  const { data: orderReceipt, isLoading: isOrderConfirming, isSuccess: isOrderConfirmed } = useWaitForTransactionReceipt({
     hash: orderHash,
   });
 
@@ -60,6 +61,22 @@ export default function Home() {
 
   // Get chain info from config
   const currentChain = config.chains.find(chain => chain.id === chainId);
+
+  const fromTokenAddress = fromToken === 'water' ? WATER_TOKEN_ADDRESS : FIRE_TOKEN_ADDRESS;
+  const { data: fromBalanceData, isLoading: isFromBalanceLoading } = useBalance({
+    address: address,
+    token: fromTokenAddress,
+    chainId: chainId,
+  });
+  const formattedFromBalance = fromBalanceData ? parseFloat(formatEther(fromBalanceData.value)).toFixed(2) : "0.0";
+
+  const toTokenAddress = toToken === 'water' ? WATER_TOKEN_ADDRESS : FIRE_TOKEN_ADDRESS;
+  const { data: toBalanceData, isLoading: isToBalanceLoading } = useBalance({
+    address: address,
+    token: toTokenAddress,
+    chainId: chainId,
+  });
+  const formattedToBalance = toBalanceData ? parseFloat(formatEther(toBalanceData.value)).toFixed(2) : "0.0";
 
   const handleSwapTokens = () => {
     setFromToken(toToken);
@@ -93,6 +110,16 @@ export default function Home() {
   const handlePlaceOrder = async () => {
     if (!pendingAmount) return;
     
+    const buyOrder = JSON.stringify({
+      owner: address,
+      token: WATER_TOKEN_ADDRESS,
+      price: parseEther("1.0").toString(), // Same price
+      size: pendingAmount.toString(),
+      isBuy: true
+    });
+    const encryptedBuyOrder = toHex(stringToBytes(buyOrder));
+
+    console.log(encryptedBuyOrder);
     try {
       setSwapStatus("placing");
       console.log('Initiating order placement...');
@@ -100,7 +127,7 @@ export default function Home() {
       const hash = await writeContractAsync({
         ...contractConfig,
         functionName: 'placeOrder',
-        args: [pendingAmount, parseEther('1'), fromToken === 'water'],
+        args: [encryptedBuyOrder],
       });
 
       if (!hash) {
@@ -127,16 +154,50 @@ export default function Home() {
 
   // Effect to handle order confirmation
   useEffect(() => {
-    if (isOrderConfirmed) {
-      console.log('Order confirmed!');
+    if (isOrderConfirmed && orderReceipt) {
+      console.log('Order confirmed! Receipt:', orderReceipt);
       setSwapStatus("success");
+
+      const orderPlacedEventAbiItem = contractConfig.abi.find(
+        (item: any) => item.type === "event" && item.name === "OrderPlaced"
+      );
+
+      if (orderPlacedEventAbiItem) {
+        for (const log of orderReceipt.logs) {
+          // Filter logs by the contract address that emitted the event
+          if (log.address.toLowerCase() === contractConfig.address.toLowerCase()) {
+            try {
+              const decodedLog = decodeEventLog({
+                abi: [orderPlacedEventAbiItem], // ABI for the specific event
+                data: log.data,
+                topics: log.topics as any, // Cast topics to any to satisfy viem type if necessary
+              });
+
+              if (decodedLog.eventName === "OrderPlaced") {
+                const orderId = (decodedLog.args as any).orderId; 
+                console.log(`Order placed with ID: ${orderId}`);
+                setDisplayedOrderId(orderId.toString()); // Store the order ID
+                // You could store this orderId in a state if needed elsewhere
+                break; 
+              }
+            } catch (e) {
+              // This log might be from our contract but not the OrderPlaced event,
+              // or there was an issue decoding it.
+              // console.debug("Could not decode log or not the OrderPlaced event:", log, e);
+            }
+          }
+        }
+      } else {
+        console.warn("OrderPlaced event ABI item not found in contractConfig.abi. Make sure the ABI is correctly configured.");
+      }
+
       // Clear input fields on success
       setFromAmount("");
       setToAmount("");
       // Clear the pending amount
       setPendingAmount(undefined);
     }
-  }, [isOrderConfirmed]);
+  }, [isOrderConfirmed, orderReceipt]);
 
   const handleSwap = async () => {
     if (!fromAmount || !address) return;
@@ -145,6 +206,7 @@ export default function Home() {
     setErrorMessage(null);
     setApprovalHash(undefined);
     setOrderHash(undefined);
+    setDisplayedOrderId(null); // Reset displayed order ID when starting a new swap
 
     // Enhanced network check
     if (!isCorrectNetwork) {
@@ -212,6 +274,14 @@ export default function Home() {
     }
   };
 
+  const handleCloseSuccessPopup = () => {
+    setSwapStatus("idle");
+    setDisplayedOrderId(null);
+    // Optionally clear amounts too if desired
+    // setFromAmount("");
+    // setToAmount("");
+  };
+
   // Add this helper function to check if amount is valid
   const isValidAmount = (amount: string) => {
     const num = parseFloat(amount);
@@ -222,9 +292,10 @@ export default function Home() {
     <div className="dark-gradient min-h-screen flex flex-col">
       {/* Header */}
       <header className="p-4 flex justify-between items-center">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-4">
           <Image src="/logo.svg" alt="ROFL Swap Logo" width={40} height={40} />
           <h1 className="text-xl font-bold text-white">ROFL Swap</h1>
+          <Image src="/logoOasis.svg" alt="ROFL Swap Logo" width={120} height={600} />
         </div>
         <div className="flex items-center gap-2">
           {isConnected ? (
@@ -263,8 +334,24 @@ export default function Home() {
       {/* Main Content */}
       <main className="flex-1 flex items-center justify-center p-4">
         {errorMessage && (
-          <div className="absolute top-24 w-full max-w-md mx-auto bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-4">
+          <div className="absolute top-24 w-full max-w-md mx-auto bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-4 z-50">
             <p className="text-red-500 text-center">{errorMessage}</p>
+          </div>
+        )}
+        
+        {swapStatus === "success" && displayedOrderId && (
+          <div className="absolute top-24 w-full max-w-md mx-auto bg-green-500/10 border border-green-500/50 rounded-lg p-4 mb-4 z-50">
+            <div className="flex justify-between items-center">
+              <p className="text-green-500 text-center font-semibold">
+                Order Placed Successfully!
+              </p>
+              <Button variant="ghost" size="sm" onClick={handleCloseSuccessPopup} className="text-green-500 hover:text-green-700">
+                X
+              </Button>
+            </div>
+            <p className="text-green-500 text-center mt-2">
+              Order ID: {displayedOrderId}
+            </p>
           </div>
         )}
         
@@ -286,12 +373,7 @@ export default function Home() {
             <CardTitle className="text-xl font-bold flex items-center justify-between">
               <span>Swap</span>
               <div className="flex gap-2">
-                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-white">
-                  Limit
-                </Button>
-                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-white">
-                  Pool
-                </Button>
+                <span className="text-base text-muted-foreground">Dark Pool</span>
               </div>
             </CardTitle>
           </CardHeader>
@@ -301,7 +383,9 @@ export default function Home() {
             <div className="p-4 bg-muted rounded-xl">
               <div className="flex justify-between mb-2">
                 <span className="text-sm text-muted-foreground">From</span>
-                <span className="text-sm text-muted-foreground">Balance: 0.0</span>
+                <span className="text-sm text-muted-foreground">
+                  Balance: {isConnected && isCorrectNetwork ? (isFromBalanceLoading ? "Loading..." : formattedFromBalance) : "0.0"}
+                </span>
               </div>
               <div className="flex items-center space-x-3">
                 <input
@@ -340,14 +424,16 @@ export default function Home() {
             <div className="p-4 bg-muted rounded-xl">
               <div className="flex justify-between mb-2">
                 <span className="text-sm text-muted-foreground">To</span>
-                <span className="text-sm text-muted-foreground">Balance: 0.0</span>
+                <span className="text-sm text-muted-foreground">
+                  Balance: {isConnected && isCorrectNetwork ? (isToBalanceLoading ? "Loading..." : formattedToBalance) : "0.0"}
+                </span>
               </div>
               <div className="flex items-center space-x-3">
                 <input
                   type="text"
                   value={toAmount}
                   readOnly
-                  className="bg-transparent text-2xl font-semibold flex-1 focus:outline-none"
+                  className="bg-transparent text-2xl font-semibold flex-1 focus:outline-none rounded-lg px-3 py-1.5 w-[140px] placeholder:text-muted-foreground/50"
                   placeholder="0.00"
                 />
                 <Button 
@@ -355,7 +441,7 @@ export default function Home() {
                   className={`flex items-center gap-2 ${toToken === "water" ? "text-water" : "text-fire"}`}
                 >
                   <TokenIcon type={toToken} />
-                  <span className="font-semibold">{toToken === "water" ? "WATER" : "FIRE"}</span>
+                  <span className="font-semibold max-w-[70px] overflow-hidden text-ellipsis whitespace-nowrap">{toToken === "water" ? "WATER" : "FIRE"}</span>
                   <ChevronDown size={16} />
                 </Button>
               </div>
