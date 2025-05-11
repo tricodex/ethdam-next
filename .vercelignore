@@ -1,0 +1,18 @@
+# Vercel ignore file
+
+# Standard Node.js ignores
+.git
+.vscode
+.github
+
+# We want to keep node_modules for native dependencies like lightningcss
+# node_modules
+
+# Ignore local development files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Keep the build cache for faster deployments
+!.next 

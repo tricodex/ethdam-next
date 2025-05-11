@@ -1,7 +1,15 @@
-import type { NextConfig } from "next";
+import { NextConfig } from 'next';
 
+/** @type {import('next').NextConfig} */
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // @ts-expect-error - Missing type definition for lightningcss in the NextConfig type
+    css: {
+      lightningcss: false
+    }
+  },
+  // Fallback compiler options in case swc/lightningcss has issues
+  swcMinify: true
 };
 
 export default nextConfig;

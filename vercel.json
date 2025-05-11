@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next",
+      "config": {
+        "installCommand": "npm install --include=optional",
+        "buildCommand": "npm run build"
+      }
+    }
+  ],
+  "build": {
+    "env": {
+      "LIGHTNINGCSS_REQUIRE_BINARY": "true"
+    }
+  }
+} 
